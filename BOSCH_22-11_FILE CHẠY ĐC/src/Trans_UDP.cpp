@@ -16,8 +16,7 @@ Trans_UDP::~Trans_UDP() {
 
 bool Trans_UDP::initSocket() {
     sock_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock_ < 0) 
-    {
+    if (sock_ < 0) {
         std::cerr << "Không tạo được socket UDP\n";
         return false;
     }

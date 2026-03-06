@@ -84,7 +84,7 @@ cv::Mat LaneDetector::getMask() const{
 // copyright by quan
 
 
-void LaneDetector::processFrame() {
+void LaneDetector::processFrame(cv::Mat& frame_resize) {
     bird_eye_view = applyIPM(frame_resize);
     mask = processMask(bird_eye_view);
 
@@ -103,8 +103,8 @@ void LaneDetector::processFrame() {
 
     if (!initialized) {
         slidingWindow(mask, left_points, right_points, bird_eye_view, minpix);
-        left_ok  = (left_points.size()  >= 60);
-        right_ok = (right_points.size() >= 60);
+        left_ok  = (left_points.size()  >= 80);
+        right_ok = (right_points.size() >= 80);
 
         if (left_ok)  left_coeffs  = fitPoly(left_points, bird_eye_view, true);
         if (right_ok) right_coeffs = fitPoly(right_points, bird_eye_view, false);
@@ -132,7 +132,7 @@ void LaneDetector::processFrame() {
     else 
     {
         
-        cv::Mat bird_eye_view_local = bird_eye_view; // copy 
+        cv::Mat bird_eye_view_local = bird_eye_view; // copy sâu
    
         slidingWindowAdaptive(mask, left_points, bird_eye_view_local, prev_left);
         slidingWindowAdaptive(mask, right_points, bird_eye_view_local, prev_right);
@@ -217,8 +217,7 @@ void LaneDetector::processFrame() {
 }
 
 
-cv::Mat LaneDetector::applyIPM(cv::Mat& frame) // frame_resize
-{
+cv::Mat LaneDetector::applyIPM(cv::Mat& frame) {
     float offsetY = -70.0f;
     float offsetX = 100.0f;
 
@@ -248,8 +247,7 @@ cv::Mat LaneDetector::applyIPM(cv::Mat& frame) // frame_resize
 void LaneDetector::slidingWindow(const cv::Mat& mask,
                        std::vector<cv::Point>& left_points,
                        std::vector<cv::Point>& right_points,
-                       cv::Mat& outImg, int minpix) 
-{
+                       cv::Mat& outImg, int minpix) {
     int nwindows = 15;
     int margin   = 60;
     int height   = mask.rows;
@@ -283,16 +281,12 @@ void LaneDetector::slidingWindow(const cv::Mat& mask,
 
         if (!good_left.empty()) {
             cv::rectangle(outImg, left_win, cv::Scalar(0,255,0), 2);
-            left_points.insert(left_points.end(), good_left.begin(), good_left.end());
         }
         if (!good_right.empty()) {
             cv::rectangle(outImg, right_win, cv::Scalar(0,255,0), 2);
-            right_points.insert(right_points.end(), good_right.begin(), good_right.end());
         }
-
-        // đề xuất đẩy code lên trên
-        //left_points.insert(left_points.end(), good_left.begin(), good_left.end());
-        //right_points.insert(right_points.end(), good_right.begin(), good_right.end());
+        left_points.insert(left_points.end(), good_left.begin(), good_left.end());
+        right_points.insert(right_points.end(), good_right.begin(), good_right.end());
 
         if ((int)good_left.size() > minpix) {
             int sumx = 0;
@@ -306,160 +300,6 @@ void LaneDetector::slidingWindow(const cv::Mat& mask,
         }
     }
 }
-#if 0 // đề xuất của chat gpt cái tiến sliding window ở trên
-#include <opencv2/opencv.hpp>
-#include <algorithm>
-#include <numeric>
-
-static inline int clampi(int v, int lo, int hi) {
-    return std::max(lo, std::min(v, hi));
-}
-
-static inline cv::Rect clampRect(const cv::Rect& r, int width, int height) {
-    int x = clampi(r.x, 0, width  - 1);
-    int y = clampi(r.y, 0, height - 1);
-
-    int w = r.width;
-    int h = r.height;
-
-    // giảm w/h nếu vượt biên
-    if (x + w > width)  w = width  - x;
-    if (y + h > height) h = height - y;
-
-    // nếu w/h không hợp lệ thì trả rect rỗng
-    if (w <= 0 || h <= 0) return cv::Rect(0,0,0,0);
-
-    return cv::Rect(x, y, w, h);
-}
-
-static inline int meanX(const std::vector<cv::Point>& pts) {
-    if (pts.empty()) return 0;
-    long long sum = 0;
-    for (const auto& p : pts) sum += p.x;
-    return static_cast<int>(sum / (long long)pts.size());
-}
-
-// mask: CV_8UC1 (0/255). outImg: ảnh để vẽ debug (có thể là BGR)
-void LaneDetector::slidingWindow(const cv::Mat& mask,
-                                 std::vector<cv::Point>& left_points,
-                                 std::vector<cv::Point>& right_points,
-                                 cv::Mat& outImg,
-                                 int minpix)
-{
-    left_points.clear();
-    right_points.clear();
-
-    if (mask.empty() || mask.type() != CV_8UC1) return;
-
-    const int nwindows = 15;
-    const int margin   = 60;
-
-    const int height = mask.rows;
-    const int width  = mask.cols;
-    const int window_height = std::max(1, height / nwindows);
-
-    // 1) Histogram nửa dưới để tìm base
-    cv::Mat bottom = mask(cv::Rect(0, height/2, width, height - height/2));
-    cv::Mat hist;
-    cv::reduce(bottom, hist, 0, cv::REDUCE_SUM, CV_32S); // 1 x width
-
-    const int midpoint = width / 2;
-
-    const int* hptr = hist.ptr<int>(0);
-
-    int leftx_base = 0;
-    int rightx_base = midpoint;
-
-    // argmax [0, midpoint)
-    {
-        int bestIdx = 0;
-        int bestVal = hptr[0];
-        for (int i = 1; i < midpoint; ++i) {
-            if (hptr[i] > bestVal) { bestVal = hptr[i]; bestIdx = i; }
-        }
-        leftx_base = bestIdx;
-    }
-
-    // argmax [midpoint, width)
-    {
-        int bestIdx = midpoint;
-        int bestVal = hptr[midpoint];
-        for (int i = midpoint + 1; i < width; ++i) {
-            if (hptr[i] > bestVal) { bestVal = hptr[i]; bestIdx = i; }
-        }
-        rightx_base = bestIdx;
-    }
-
-    int leftx_current  = leftx_base;
-    int rightx_current = rightx_base;
-
-    // 2) Trượt cửa sổ từ dưới lên
-    for (int window = 0; window < nwindows; ++window) {
-
-        int win_y_low  = height - (window + 1) * window_height;
-        int win_y_high = height - window * window_height;
-
-        // clamp y
-        win_y_low  = clampi(win_y_low,  0, height);
-        win_y_high = clampi(win_y_high, 0, height);
-        int h = win_y_high - win_y_low;
-        if (h <= 0) continue;
-
-        // Tạo rect thô rồi clamp vào ảnh
-        cv::Rect left_raw(leftx_current - margin,  win_y_low, 2*margin, h);
-        cv::Rect right_raw(rightx_current - margin, win_y_low, 2*margin, h);
-
-        cv::Rect left_win  = clampRect(left_raw,  width, height);
-        cv::Rect right_win = clampRect(right_raw, width, height);
-
-        std::vector<cv::Point> good_left, good_right;
-
-        // 3) Tối ưu: findNonZero theo ROI (không scan toàn bộ nonzero mỗi lần)
-        if (left_win.area() > 0) {
-            cv::Mat roi = mask(left_win);
-            std::vector<cv::Point> pts;
-            cv::findNonZero(roi, pts);
-            good_left.reserve(pts.size());
-            for (const auto& p : pts) {
-                // chuyển về tọa độ toàn ảnh
-                good_left.emplace_back(p.x + left_win.x, p.y + left_win.y);
-            }
-            if (!good_left.empty()) {
-                cv::rectangle(outImg, left_win, cv::Scalar(0,255,0), 2);
-            }
-        }
-
-        if (right_win.area() > 0) {
-            cv::Mat roi = mask(right_win);
-            std::vector<cv::Point> pts;
-            cv::findNonZero(roi, pts);
-            good_right.reserve(pts.size());
-            for (const auto& p : pts) {
-                good_right.emplace_back(p.x + right_win.x, p.y + right_win.y);
-            }
-            if (!good_right.empty()) {
-                cv::rectangle(outImg, right_win, cv::Scalar(0,255,0), 2);
-            }
-        }
-
-        // gom điểm
-        left_points.insert(left_points.end(), good_left.begin(), good_left.end());
-        right_points.insert(right_points.end(), good_right.begin(), good_right.end());
-
-        // 4) recenter nếu đủ điểm
-        if ((int)good_left.size() > minpix) {
-            leftx_current = meanX(good_left);
-        }
-        if ((int)good_right.size() > minpix) {
-            rightx_current = meanX(good_right);
-        }
-
-        // 5) clamp tâm để tránh drift khỏi ảnh
-        leftx_current  = clampi(leftx_current,  0, width - 1);
-        rightx_current = clampi(rightx_current, 0, width - 1);
-    }
-}
-#endif
 
 void LaneDetector::slidingWindowAdaptive(const cv::Mat& mask,
                                std::vector<cv::Point>& lane_points,
@@ -493,7 +333,6 @@ void LaneDetector::slidingWindowAdaptive(const cv::Mat& mask,
             if (win.contains(p)) {
                 lane_points.push_back(p);
             }
-            
         }
     }
 }
@@ -565,36 +404,37 @@ std::vector<cv::Point> LaneDetector::computeCenterline(cv::Vec3f coeff_left,
         return c[0] * y * y + c[1] * y + c[2];
     };
 
-    if (has_left && has_right) 
-    {
+    if (has_left && has_right) {
         std::vector<float> widths;
         float d;
         for (int y = 0; y < outImg.rows; y += 20) {
             d = fabs(evalX(coeff_right, y) - evalX(coeff_left, y));  
-            if (d > 200 && d < 600)  
+            if (d > 50 && d < 600)  
                 widths.push_back(d);
         }
         if (!widths.empty()) {
-            float sum = 0;
+            float sum =0;
             for(auto b: widths) sum += b;
             laneW_avg = sum/widths.size();
         }
     }
 
     float current_laneW = 600.0f;
-    if(laneW_avg < 395.0f || laneW_avg > 405.0f) 
+    if(laneW_avg < 350.0f || laneW_avg > 450.0f) 
     {
         current_laneW = LANE_WIDTH_PX;
     }
     else
     {
-        current_laneW = laneW_avg; 
+        current_laneW = laneW_avg;
     }
-
-    for (int y = 0; y < outImg.rows; y += 10) {
+    //outImg.rows = 480
+    for (int y = 0; y < outImg.rows ; y += 10) {
+        
         float xc = -1;
+
         if (has_left && has_right) {
-            xc = 0.5f * (evalX(coeff_left, y) + evalX(coeff_right, y));  
+            xc = 0.5f * (evalX(coeff_left, y) + evalX(coeff_right, y));
         }
 
         else if (has_left) {
@@ -607,13 +447,12 @@ std::vector<cv::Point> LaneDetector::computeCenterline(cv::Vec3f coeff_left,
             continue;  
         }
         int x = std::clamp((int)std::round(xc), 0, outImg.cols - 1);
-        if (x > 0)
-        {
-            centerline.push_back({x, y});  
-            cv::circle(outImg, {x, y}, 2, {255, 255, 0}, -1);
-        }
+	if (x > 0)
+	{
+        centerline.push_back({x, y});  
+        cv::circle(outImg, {x, y}, 2, {255, 255, 0}, -1);
+	}
     }
-
     std::cout << "Lane Width Average: " << current_laneW << "px" << std::endl;
 
     // ==== Debug hiển thị ==== 

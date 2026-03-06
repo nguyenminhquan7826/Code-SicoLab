@@ -16,7 +16,7 @@ public:
 
     bool getFrame(cv::Mat& frame_resize);
     bool isOpened() const;
-    void processFrame();
+    void processFrame(cv::Mat& frame_resize);
     
     // Getters for MPC computation
     std::vector<cv::Point> getCenterline() const { return centerline; }

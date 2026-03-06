@@ -87,7 +87,7 @@ void Logic::run() {
                 continue;
             }
 
-            detector.processFrame();
+            detector.processFrame(frame_local);
             std::vector<cv::Point> centerline = detector.getCenterline(); 
             cv::Mat birdEyeView = detector.getBirdEyeView();        
             MpcState state = mpc.computeMpcParameters(centerline, birdEyeView); 
